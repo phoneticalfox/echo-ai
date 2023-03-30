@@ -1,88 +1,121 @@
 #!/bin/bash
 
-# Create or update data.json
-if [ ! -f "data.json" ]; then
-  echo '{"prompts": []}' > data.json
+# Check if ncurses is installed
+if ! dpkg -s libncurses5-dev >/dev/null 2>&1; then
+    # Install ncurses using package manager
+    echo "ncurses not found. Installing..."
+    if command -v apt >/dev/null 2>&1; then
+        sudo apt update
+        sudo apt install -y libncurses5-dev
+    elif command -v pacman >/dev/null 2>&1; then
+        sudo pacman -Syu
+        sudo pacman -S --noconfirm ncurses5-compat-libs
+    elif command -v yum >/dev/null 2>&1; then
+        sudo yum update
+        sudo yum install -y ncurses-devel
+    elif command -v brew >/dev/null 2>&1; then
+        brew install ncurses
+    else
+        echo "Unable to find package manager. Please install ncurses manually."
+        exit 1
+    fi
 fi
 
-# Define functions
-function ui {
-  # Clear screen
-  clear
+# Check if data.json exists, and create it if it doesn't
+if [ ! -f "data.json" ]; then
+    echo "{}" > data.json
+fi
 
-  # Display header
-  echo -e "\n\t\e[1mEcho AI Chat Bot\e[0m\n"
+# Define UI function
+ui() {
+    # Set terminal title
+    echo -ne "\033]0;Echo AI v1.0\007"
 
-  # Display instructions
-  echo -e "\tInstructions: Use the arrow keys to navigate and Enter to select.\n"
+    # Create menu options
+    options=("Chat" "Data" "Exit")
 
-  # Read data from JSON file
-  local options=($(jq -r '.prompts[] | "\(.prompt)"' data.json))
+    # Loop through options
+    while true; do
+        # Clear screen
+        clear
 
-  # Add option to enter a new prompt
-  options+=("Add New Prompt")
+        # Print title
+        echo "Echo AI v1.0"
 
-  # Display options using dialog
-  local choice=$(dialog --clear \
-                   --backtitle "Echo AI Chat Bot" \
-                   --title "Select a Prompt" \
-                   --menu "Choose one of the following options:" \
-                   15 50 6 \
-                   "${options[@]}" \
-                   2>&1 >/dev/tty)
+        # Print menu options
+        for i in "${!options[@]}"; do
+            echo "$((i+1)). ${options[$i]}"
+        done
 
-  # Handle user choice
-  case "$choice" in
-    "Add New Prompt")
-      add_prompt
-      ;;
-    *)
-      get_response "$choice"
-      ;;
-  esac
+        # Get user input
+        read -p "Enter choice: " choice
+
+        # Handle user input
+        case $choice in
+            1)
+                # Call chat function
+                chat
+                ;;
+            2)
+                # Call data function
+                data
+                ;;
+            3)
+                # Exit program
+                exit 0
+                ;;
+            *)
+                # Invalid input
+                echo "Invalid choice. Press enter to try again."
+                read -n 1
+                ;;
+        esac
+    done
 }
 
-function add_prompt {
-  # Prompt user for new prompt
-  local prompt=$(dialog --clear \
-                 --backtitle "Echo AI Chat Bot" \
-                 --title "Add New Prompt" \
-                 --inputbox "Enter a new prompt:" \
-                 10 50 \
-                 2>&1 >/dev/tty)
+chat_bot() {
+  # Check if data file exists
+  if [ ! -f data.json ]; then
+    touch data.json
+    echo '{"conversations":[]}' > data.json
+  fi
 
-  # Add new prompt to JSON file
-  jq ".prompts |= . + [{\"prompt\":\"$prompt\", \"responses\":[] }]" data.json > tmp.json && mv tmp.json data.json
+  # Check for dependencies
+  check_dependencies
 
-  # Display confirmation message
-  dialog --clear \
-         --backtitle "Echo AI Chat Bot" \
-         --title "Prompt Added" \
-         --msgbox "The prompt \"$prompt\" has been added." \
-         10 50 \
-         2>&1 >/dev/tty
+  # Log session start time
+  log_data '{"session_start":"'$(date +%s)'"}'
 
-  # Reload UI
-  ui
+  # Welcome message
+  print_message "Welcome to Echo AI! Type 'exit' to quit at any time."
+
+  # Start conversation loop
+  while true; do
+    # Get user input
+    input=$(get_input)
+
+    # Check if user wants to exit
+    if [[ "$input" == "exit" ]]; then
+      log_data '{"session_end":"'$(date +%s)'"}'
+      print_message "Goodbye!"
+      break
+    fi
+
+    # Generate response
+    response=$(get_response "$input")
+
+    # Print response
+    print_message "$response"
+  done
 }
 
-function get_response {
-  # Read responses from JSON file
-  local responses=($(jq -r --arg choice "$1" '.prompts[] | select(.prompt == $choice) | .responses[]' data.json))
+# Define data function
+data() {
+    # Print data.json
+    cat data.json
 
-  # Choose a random response
-  local response=${responses[$RANDOM % ${#responses[@]}]}
-
-  # Display response using dialog
-  dialog --clear \
-         --backtitle "Echo AI Chat Bot" \
-         --title "$1" \
-         --msgbox "$response" \
-         10 50 \
-         2>&1 >/dev/tty
-
-  # Reload UI
-  ui
+    # Wait for user input
+    read -n 1 -s -r -p "Press any key to continue..."
 }
 
 # Call the UI function to start the program
