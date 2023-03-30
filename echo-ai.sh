@@ -26,6 +26,64 @@ if [ ! -f "data.json" ]; then
     echo "{}" > data.json
 fi
 
+# Set up ncurses environment
+export TERM=xterm-256color
+tput clear
+tput civis  # Hide cursor
+
+# Define menu options
+options=("Option 1" "Option 2" "Option 3" "Quit")
+selected=0
+num_options=${#options[@]}
+
+# Define function to display menu
+display_menu() {
+    tput reset
+    tput bold
+    tput cup 3 20
+    echo "Echo AI Menu"
+    tput sgr0
+    tput cup 5 20
+    for i in "${!options[@]}"; do
+        if [[ $i -eq $selected ]]; then
+            tput smso  # Start standout mode (reverse video)
+        fi
+        echo "${options[$i]}"
+        tput sgr0
+    done
+}
+
+# Display initial menu
+display_menu
+
+# Handle arrow key input to navigate menu
+while true; do
+    read -s -n3 key
+    case $key in
+        $'\e[A')  # Up arrow
+            ((selected--))
+            ((selected+=num_options))
+            ((selected%=num_options))
+            display_menu
+            ;;
+        $'\e[B')  # Down arrow
+            ((selected++))
+            ((selected%=num_options))
+            display_menu
+            ;;
+        '')  # Enter key
+            if [[ $selected -eq $((num_options-1)) ]]; then
+                tput clear
+                tput cnorm  # Restore cursor
+                exit 0
+            fi
+            # Handle selected option
+            # ...
+            ;;
+    esac
+done
+
+
 # Define UI function
 ui() {
     # Set terminal title
