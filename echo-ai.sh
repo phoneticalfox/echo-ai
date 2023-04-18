@@ -1,180 +1,126 @@
 #!/bin/bash
 
-# Check if ncurses is installed
-if ! dpkg -s libncurses5-dev >/dev/null 2>&1; then
-    # Install ncurses using package manager
-    echo "ncurses not found. Installing..."
-    if command -v apt >/dev/null 2>&1; then
-        sudo apt update
-        sudo apt install -y libncurses5-dev
-    elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman -Syu
-        sudo pacman -S --noconfirm ncurses5-compat-libs
-    elif command -v yum >/dev/null 2>&1; then
-        sudo yum update
-        sudo yum install -y ncurses-devel
-    elif command -v brew >/dev/null 2>&1; then
-        brew install ncurses
-    else
-        echo "Unable to find package manager. Please install ncurses manually."
-        exit 1
-    fi
-fi
-
-# Check if data.json exists, and create it if it doesn't
-if [ ! -f "data.json" ]; then
-    echo "{}" > data.json
-fi
-
-# Set up ncurses environment
-export TERM=xterm-256color
-tput clear
-tput civis  # Hide cursor
-
-# Define menu options
-options=("Option 1" "Option 2" "Option 3" "Quit")
-selected=0
-num_options=${#options[@]}
-
-# Define function to display menu
-display_menu() {
-    tput reset
-    tput bold
-    tput cup 3 20
-    echo "Echo AI Menu"
-    tput sgr0
-    tput cup 5 20
-    for i in "${!options[@]}"; do
-        if [[ $i -eq $selected ]]; then
-            tput smso  # Start standout mode (reverse video)
+# Check dependencies and install if necessary
+check_dependencies() {
+    declare -a dependencies=("ncurses" "jq")
+    for dep in "${dependencies[@]}"; do
+        if ! command -v "$dep" > /dev/null; then
+            echo "Installing $dep..."
+            if command -v apt > /dev/null; then
+                sudo apt install -y "$dep"
+            elif command -v pacman > /dev/null; then
+                sudo pacman -S --noconfirm "$dep"
+            elif command -v pkg > /dev/null; then
+                sudo pkg install -y "$dep"
+            elif command -v yum > /dev/null; then
+                sudo yum install -y "$dep"
+            else
+                echo "Error: Package manager not found."
+                exit 1
+            fi
         fi
-        echo "${options[$i]}"
-        tput sgr0
     done
 }
 
-# Display initial menu
-display_menu
+# Initialize dataset file if it doesn't exist
+initialize_dataset() {
+    if [[ ! -f dataset.json ]]; then
+        echo '{"prompts":[], "responses":[]}' > dataset.json
+    fi
+}
 
-# Handle arrow key input to navigate menu
-while true; do
-    read -s -n3 key
-    case $key in
-        $'\e[A')  # Up arrow
-            ((selected--))
-            ((selected+=num_options))
-            ((selected%=num_options))
-            display_menu
-            ;;
-        $'\e[B')  # Down arrow
-            ((selected++))
-            ((selected%=num_options))
-            display_menu
-            ;;
-        '')  # Enter key
-            if [[ $selected -eq $((num_options-1)) ]]; then
-                tput clear
-                tput cnorm  # Restore cursor
-                exit 0
-            fi
-            # Handle selected option
-            # ...
-            ;;
-    esac
-done
-
-
-# Define UI function
-ui() {
-    # Set terminal title
-    echo -ne "\033]0;Echo AI v1.0\007"
-
-    # Create menu options
-    options=("Chat" "Data" "Exit")
-
-    # Loop through options
-    while true; do
-        # Clear screen
-        clear
-
-        # Print title
-        echo "Echo AI v1.0"
-
-        # Print menu options
-        for i in "${!options[@]}"; do
-            echo "$((i+1)). ${options[$i]}"
-        done
-
-        # Get user input
-        read -p "Enter choice: " choice
-
-        # Handle user input
-        case $choice in
-            1)
-                # Call chat function
-                chat
+# Prompt user for feedback on chatbot response
+get_feedback() {
+    local prompt="$1"
+    local response="$2"
+    local valid_responses=("helpful" "neutral" "not helpful")
+    local feedback=""
+    while ! [[ "${valid_responses[@]}" =~ "$feedback" ]]; do
+        echo "Was the response helpful, neutral, or not helpful? (h/n/b)"
+        read -r feedback
+        case "$feedback" in
+            h)
+                echo "{\"prompt\":\"$prompt\",\"response\":\"$response\",\"feedback\":\"helpful\"}" \
+                    | jq --arg date "$(date +%s)" '. + {"timestamp":$date}' \
+                    >> dataset.json
                 ;;
-            2)
-                # Call data function
-                data
+            n)
+                echo "{\"prompt\":\"$prompt\",\"response\":\"$response\",\"feedback\":\"neutral\"}" \
+                    | jq --arg date "$(date +%s)" '. + {"timestamp":$date}' \
+                    >> dataset.json
                 ;;
-            3)
-                # Exit program
-                exit 0
+            b)
+                echo "{\"prompt\":\"$prompt\",\"response\":\"$response\",\"feedback\":\"not helpful\"}" \
+                    | jq --arg date "$(date +%s)" '. + {"timestamp":$date}' \
+                    >> dataset.json
                 ;;
             *)
-                # Invalid input
-                echo "Invalid choice. Press enter to try again."
-                read -n 1
+                echo "Invalid input."
                 ;;
         esac
     done
 }
 
-chat_bot() {
-  # Check if data file exists
-  if [ ! -f data.json ]; then
-    touch data.json
-    echo '{"conversations":[]}' > data.json
-  fi
-
-  # Check for dependencies
-  check_dependencies
-
-  # Log session start time
-  log_data '{"session_start":"'$(date +%s)'"}'
-
-  # Welcome message
-  print_message "Welcome to Echo AI! Type 'exit' to quit at any time."
-
-  # Start conversation loop
-  while true; do
-    # Get user input
-    input=$(get_input)
-
-    # Check if user wants to exit
-    if [[ "$input" == "exit" ]]; then
-      log_data '{"session_end":"'$(date +%s)'"}'
-      print_message "Goodbye!"
-      break
-    fi
-
-    # Generate response
-    response=$(get_response "$input")
-
-    # Print response
-    print_message "$response"
-  done
+# Display chat screen and save chat session to file
+chat() {
+    local prompt=""
+    while true; do
+        clear
+        echo "echo ai v1.0"
+        echo "Chat"
+        echo ""
+        echo "Enter a prompt (q to quit):"
+        read -r prompt
+        if [[ "$prompt" == "q" ]]; then
+            break
+        fi
+        # Simulate chatbot response by echoing the prompt
+        local response="$prompt"
+        get_feedback "$prompt" "$response"
+        echo "{\"prompt\":\"$prompt\",\"response\":\"$response\"}" \
+            | jq --arg date "$(date +%s)" '. + {"timestamp":$date}' \
+            >> "chat_$(date +%Y%m%d%H%M%S).json"
+    done
 }
 
-# Define data function
-data() {
-    # Print data.json
-    cat data.json
-
-    # Wait for user input
-    read -n 1 -s -r -p "Press any key to continue..."
+# Display history screen and allow user to view, search, and call chat sessions
+history() {
+    clear
+    echo "echo ai v1.0"
+    echo "History"
+    echo ""
+    echo "Enter a chat session to view (q to quit):"
+    read -r session
+    # Simulate chat history by echoing the session ID
+    echo "Session ID: $session"
 }
 
-# Call the UI function to start the program
-ui
+check_dependencies
+initialize_dataset
+
+# Main loop
+while true; do
+    clear
+    echo "echo ai v1.0"
+    echo "Main Menu"
+    echo ""
+    echo "1. Chat"
+    echo "2. History"
+    echo "3. Quit"
+    read -r choice
+    case "$choice" in
+        1)
+            chat
+            ;;
+        2)
+            history
+            ;;
+        3)
+            exit 0
+            ;;
+        *)
+            echo "Invalid input."
+            ;;
+    esac
+done
+
